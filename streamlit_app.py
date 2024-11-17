@@ -45,7 +45,8 @@ if st.button("Generate Dishes"):
         data = {"idea": dish_idea, "style_influence": style_values}
         try:
             with st.spinner("Generating your meal..."):
-                response = requests.post("http://localhost:5000/generate_dishes", json=data)
+                # Use the public URL of your Flask API hosted on Render
+                response = requests.post("https://dishgen.onrender.com/generate_dishes", json=data)
 
             if response.status_code == 200:
                 result = response.json()
