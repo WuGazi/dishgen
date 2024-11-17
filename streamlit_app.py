@@ -44,30 +44,34 @@ if st.button("Generate Dishes"):
     else:
         data = {"idea": dish_idea, "style_influence": style_values}
         try:
-            with st.spinner("Generating your dish..."):
+            with st.spinner("Generating your meal..."):
                 response = requests.post("http://localhost:5000/generate_dishes", json=data)
 
             if response.status_code == 200:
                 result = response.json()
-                st.subheader(result["short_name"])
-                st.write(result["menu_item_description"])
+                courses = result["courses"]
+                image_url = result["image_url"]
 
-                # Ingredients and instructions dropdowns
-                with st.expander("Ingredients", expanded=True):
-                    ingredients = result["ingredients"].split('\n')
-                    for item in ingredients:
-                        st.write(f"- {item}")
+                # Display each course
+                for course in courses:
+                    st.subheader(course["name"])
+                    st.write(course["description"])
 
-                with st.expander("Instructions", expanded=True):
-                    st.write(result["instructions"])
+                    with st.expander("Ingredients"):
+                        ingredients = course["ingredients"].split('\n')
+                        for item in ingredients:
+                            st.write(f"- {item}")
 
-                # Display generated image
-                if result["image_url"]:
-                    image_placeholder.image(result["image_url"], caption="Generated Dish Image")
+                    with st.expander("Instructions"):
+                        st.write(course["instructions"])
+
+                # Display the generated image
+                if image_url:
+                    image_placeholder.image(image_url, caption="Generated Dish Image")
                 else:
                     st.warning("No image was generated.")
             else:
-                st.error(f"Error {response.status_code}: {response.text}")
+                st.error(f"Failed to generate dishes. Error {response.status_code}: {response.text}")
 
         except requests.exceptions.RequestException as e:
             st.error(f"Error communicating with Flask API: {e}")

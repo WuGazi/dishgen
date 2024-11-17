@@ -1,5 +1,4 @@
 import os
-import boto3
 import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -10,23 +9,11 @@ from logging.handlers import RotatingFileHandler
 
 # Load environment variables
 load_dotenv()
-bucket_name = os.getenv('BUCKET_NAME')
-aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
-aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-aws_region = os.getenv('AWS_REGION')
 openai_api_key = os.getenv('OPENAI_API_KEY')
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
-
-# Initialize S3 client
-s3 = boto3.client(
-    's3',
-    aws_access_key_id=aws_access_key_id,
-    aws_secret_access_key=aws_secret_access_key,
-    region_name=aws_region
-)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=openai_api_key)
@@ -42,11 +29,55 @@ if not app.debug:
     app.logger.addHandler(handler)
 app.logger.setLevel(logging.DEBUG)
 
+# Root route to display a welcome message
+@app.route('/')
+def home():
+    return "Welcome to the Dish Generator API! Use the /generate_dishes endpoint to generate dishes."
 
+# Function to interact with ChatGPT
+def interact_with_chatgpt(idea, style_influence):
+    influences = ', '.join([f"{k}: {v}" for k, v in style_influence.items() if v > 5])
+    prompt = (
+        f"Create a luxurious three-course meal based on the idea '{idea}' with the following influences: {influences}. "
+        f"Each course should include a name, a detailed description, a list of ingredients, and step-by-step instructions. "
+        f"Format the response as:\n"
+        f"Course 1: <Course Name>\nDescription: <Detailed Description>\nIngredients:\n- Ingredient 1\n- Ingredient 2\nInstructions:\n1. Step 1\n2. Step 2\n"
+        f"Repeat this for all three courses."
+    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are a culinary expert generating three-course meals."},
+                      {"role": "user", "content": prompt}],
+            max_tokens=1500,
+            temperature=0.7
+        )
+        content = response.choices[0].message.content.strip()
+        courses = re.findall(r'Course \d+:.*?(?=Course \d+:|$)', content, re.DOTALL)
+
+        parsed_courses = []
+        for course in courses:
+            name = re.search(r'Course \d+: (.+)', course)
+            description = re.search(r'Description: (.+)', course, re.DOTALL)
+            ingredients = re.search(r'Ingredients:\n(.+?)Instructions:', course, re.DOTALL)
+            instructions = re.search(r'Instructions:\n(.+)', course, re.DOTALL)
+
+            parsed_courses.append({
+                "name": name.group(1).strip() if name else "Unnamed Course",
+                "description": description.group(1).strip() if description else "No description provided.",
+                "ingredients": ingredients.group(1).strip() if ingredients else "No ingredients provided.",
+                "instructions": instructions.group(1).strip() if instructions else "No instructions provided."
+            })
+
+        return parsed_courses
+    except Exception as e:
+        app.logger.error(f"Error generating courses: {e}")
+        return []
+
+# Function to generate an image for a dish
 def generate_image(description):
     try:
-        description = description[:1000]  # Truncate if needed
-        app.logger.debug(f"Generating image for: {description}")
+        description = description[:1000]
         response = client.images.generate(
             prompt=description,
             n=1,
@@ -61,61 +92,7 @@ def generate_image(description):
         app.logger.error(f"Error generating image: {e}")
         return None
 
-
-def interact_with_chatgpt(idea, style_influence):
-    try:
-        # Generate ingredients and instructions
-        influences = ', '.join([f"{k}: {v}" for k, v in style_influence.items() if v > 5])
-        ingredients_prompt = (
-            f"Create a detailed list of ingredients and step-by-step cooking instructions "
-            f"for a dish inspired by '{idea}'. The dish should reflect the following influences: {influences}. "
-            f"Make it unique, luxurious, and suitable for a fine dining menu."
-        )
-        ingredients_response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "system", "content": "You are a helpful assistant that creates recipes."},
-                      {"role": "user", "content": ingredients_prompt}],
-            max_tokens=500,
-            temperature=0.7
-        )
-        content = ingredients_response.choices[0].message.content.strip()
-        ingredients = re.search(r'Ingredients:(.*?)Instructions:', content, re.DOTALL)
-        instructions = re.search(r'Instructions:(.*)', content, re.DOTALL)
-        ingredients = ingredients.group(1).strip() if ingredients else "No ingredients found."
-        instructions = instructions.group(1).strip() if instructions else "No instructions found."
-
-        # Generate menu description
-        description_prompt = (
-            f"Based on the following refined recipe, craft a luxurious menu description:\n\n"
-            f"Ingredients:\n{ingredients}\n\nInstructions:\n{instructions}"
-        )
-        description_response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "system", "content": "You are an expert in menu descriptions."},
-                      {"role": "user", "content": description_prompt}],
-            max_tokens=200,
-            temperature=0.7
-        )
-        description = description_response.choices[0].message.content.strip()
-
-        # Generate a short name
-        name_prompt = f"Create a short (2-5 words) dish name inspired by the menu description: '{description}'."
-        name_response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "system", "content": "You are an expert in naming dishes."},
-                      {"role": "user", "content": name_prompt}],
-            max_tokens=20,
-            temperature=0.8
-        )
-        short_name = name_response.choices[0].message.content.strip()
-
-        app.logger.info(f"Generated Dish: {short_name}")
-        return short_name, description, ingredients, instructions
-    except Exception as e:
-        app.logger.error(f"Error interacting with ChatGPT: {e}")
-        return None, None, None, None
-
-
+# Main route to generate dishes
 @app.route('/generate_dishes', methods=['POST'])
 def generate_dishes():
     data = request.json
@@ -124,22 +101,16 @@ def generate_dishes():
     if not idea:
         return jsonify({"error": "Idea is required"}), 400
 
-    short_name, description, ingredients, instructions = interact_with_chatgpt(idea, style_influence)
-    if not all([short_name, description, ingredients, instructions]):
-        return jsonify({"error": "Failed to generate dish details."}), 500
+    courses = interact_with_chatgpt(idea, style_influence)
+    if not courses:
+        return jsonify({"error": "Failed to generate dishes."}), 500
 
-    # Generate image based on the menu description
-    image_url = generate_image(description)
+    # Generate image for the main course (second course)
+    main_course_description = courses[1]["description"] if len(courses) > 1 else "No description available."
+    image_url = generate_image(main_course_description)
 
-    response_data = {
-        "short_name": short_name,
-        "menu_item_description": description,
-        "ingredients": ingredients.replace('\n', '\n- '),
-        "instructions": instructions,
-        "image_url": image_url,
-    }
-    return jsonify(response_data)
+    return jsonify({"courses": courses, "image_url": image_url})
 
-
+# Run the app
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
