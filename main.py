@@ -4,7 +4,9 @@ import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
+
+client = OpenAI(api_key=openai_api_key)
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -17,7 +19,6 @@ aws_region = os.getenv('AWS_REGION')
 openai_api_key = os.getenv('OPENAI_API_KEY')
 
 # Initialize OpenAI API
-openai.api_key = openai_api_key
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -58,15 +59,13 @@ def generate_description(idea, style_influence):
             f"The description should be evocative, luxurious, and provide a vivid sense of what the dish is like."
         )
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a culinary expert generating dish descriptions."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.7
-        )
+        response = client.chat.completions.create(model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a culinary expert generating dish descriptions."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=300,
+        temperature=0.7)
 
         # Extract the generated description
         description = response.choices[0].message.content.strip()
@@ -81,15 +80,13 @@ def generate_name(description):
     try:
         prompt = f"Based on the following menu description, generate a short and inspired name for the dish: '{description}'"
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a culinary expert generating dish names."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=50,
-            temperature=0.7
-        )
+        response = client.chat.completions.create(model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a culinary expert generating dish names."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=50,
+        temperature=0.7)
 
         # Extract the generated name
         name = response.choices[0].message.content.strip()
@@ -111,15 +108,13 @@ def generate_ingredients_components_instructions(description):
             f"Ensure the output is well-structured."
         )
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a culinary expert generating ingredients, components, and instructions for dishes."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=700,
-            temperature=0.7
-        )
+        response = client.chat.completions.create(model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a culinary expert generating ingredients, components, and instructions for dishes."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=700,
+        temperature=0.7)
 
         content = response.choices[0].message.content.strip()
 
@@ -141,12 +136,10 @@ def generate_ingredients_components_instructions(description):
 # Step 4: Generate Dish Image
 def generate_image(description):
     try:
-        response = openai.Image.create(
-            prompt=description[:1000],  # Ensure the description is within 1000 characters
-            n=1,
-            size="256x256"
-        )
-        image_url = response['data'][0]['url'] if response and 'data' in response else None
+        response = client.images.generate(prompt=description[:1000],  # Ensure the description is within 1000 characters
+        n=1,
+        size="256x256")
+        image_url = response.data[0].url if response and 'data' in response else None
         return image_url
     except Exception as e:
         app.logger.error(f"Error generating image: {e}")
