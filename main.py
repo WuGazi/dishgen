@@ -3,7 +3,7 @@ import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
-from openai import OpenAI
+import openai
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -11,12 +11,12 @@ from logging.handlers import RotatingFileHandler
 load_dotenv()
 openai_api_key = os.getenv('OPENAI_API_KEY')
 
+# Initialize OpenAI API
+openai.api_key = openai_api_key
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
-
-# Initialize OpenAI client
-client = OpenAI(api_key=openai_api_key)
 
 # Configure logging
 if not app.debug:
@@ -29,12 +29,7 @@ if not app.debug:
     app.logger.addHandler(handler)
 app.logger.setLevel(logging.DEBUG)
 
-# Root route to display a welcome message
-@app.route('/')
-def home():
-    return "Welcome to the Dish Generator API! Use the /generate_dishes endpoint to generate dishes."
-
-# Function to interact with ChatGPT
+# ChatGPT interaction
 def interact_with_chatgpt(idea, style_influence):
     influences = ', '.join([f"{k}: {v}" for k, v in style_influence.items() if v > 5])
     prompt = (
@@ -45,7 +40,7 @@ def interact_with_chatgpt(idea, style_influence):
         f"Repeat this for all three courses."
     )
     try:
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "system", "content": "You are a culinary expert generating three-course meals."},
                       {"role": "user", "content": prompt}],
@@ -74,17 +69,17 @@ def interact_with_chatgpt(idea, style_influence):
         app.logger.error(f"Error generating courses: {e}")
         return []
 
-# Function to generate an image for a dish
+# Generate dish image
 def generate_image(description):
     try:
         description = description[:1000]
-        response = client.images.generate(
+        response = openai.Image.create(
             prompt=description,
             n=1,
             size="256x256"
         )
-        if response and response.data and len(response.data) > 0:
-            return response.data[0].url
+        if response and response['data'] and len(response['data']) > 0:
+            return response['data'][0]['url']
         else:
             app.logger.error("Image generation failed.")
             return None
@@ -92,7 +87,7 @@ def generate_image(description):
         app.logger.error(f"Error generating image: {e}")
         return None
 
-# Main route to generate dishes
+# Flask endpoint
 @app.route('/generate_dishes', methods=['POST'])
 def generate_dishes():
     data = request.json
@@ -111,6 +106,5 @@ def generate_dishes():
 
     return jsonify({"courses": courses, "image_url": image_url})
 
-# Run the app
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=5000)
